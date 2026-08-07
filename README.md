@@ -29,7 +29,7 @@ Run the Python script directly in your terminal:
 python3 linux_tutor.py
 ```
 
-### Option B: Launch the Web Application
+### Option B: Launch the Web Application (static only, no accounts/leaderboard)
 You can serve the web app locally using Python's built-in HTTP server:
 ```bash
 python3 -m http.server 8080
@@ -37,3 +37,23 @@ python3 -m http.server 8080
 Then open your browser to **[http://localhost:8080](http://localhost:8080)**.
 
 Alternatively, open `index.html` directly in any web browser!
+
+### Option C: Launch the Full Backend (accounts, progress tracking, leaderboard, admin panel)
+This project also includes a Flask backend (`app.py`) with user auth, saved progress,
+quiz XP, a leaderboard, and an admin panel.
+
+```bash
+pip install -r requirements.txt
+cp .env.example .env          # then edit .env and set a real SECRET_KEY
+flask db init                 # only needed once, to create migrations/
+flask db migrate -m "Initial schema"
+flask db upgrade
+python app.py
+```
+
+Then open **[http://127.0.0.1:5000](http://127.0.0.1:5000)** (the backend also serves the frontend).
+The admin panel is at `/admin` (log in first at `/login`).
+
+⚠️ Before deploying anywhere public, make sure `SECRET_KEY` in `.env` is a real random
+value, not the default placeholder — the app will refuse to start in production mode
+otherwise.

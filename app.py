@@ -55,6 +55,15 @@ def create_app() -> Flask:
     # SECRET_KEY must be a long random string (see .env.example for how to generate one).
     app.config["SECRET_KEY"] = os.environ.get("SECRET_KEY", "dev-only-change-me")
 
+    # Never allow the app to start in production with the placeholder key —
+    # sessions and CSRF tokens signed with a known key can be forged.
+    if (os.environ.get("FLASK_ENV") == "production"
+            and app.config["SECRET_KEY"] == "dev-only-change-me"):
+        raise RuntimeError(
+            "Refusing to start: FLASK_ENV=production but SECRET_KEY is still "
+            "the default placeholder. Set a real SECRET_KEY in your .env file."
+        )
+
     # SQLite database — the file will be created automatically next to app.py
     app.config["SQLALCHEMY_DATABASE_URI"] = os.environ.get("DATABASE_URL", "sqlite:///database.db")
     app.config["SQLALCHEMY_TRACK_MODIFICATIONS"] = False  # Suppresses a deprecation warning
@@ -291,10 +300,23 @@ def create_app() -> Flask:
         root_dir = os.path.abspath(os.path.join(app.root_path, ".."))
         return send_from_directory(root_dir, "index.html")
 
+    # Only these files/extensions are safe to serve as static frontend assets.
+    # Without this whitelist, send_from_directory would happily serve any
+    # file in the project root that isn't blocked by traversal protection —
+    # including app.py, models.py, requirements.txt, .env.example, etc.
+    _STATIC_ALLOWED_EXTENSIONS = {".html", ".js", ".css", ".png", ".jpg",
+                                   ".jpeg", ".svg", ".ico", ".woff", ".woff2",
+                                   ".map", ".json"}
+
     @app.route("/<path:filename>")
     def serve_frontend_static(filename):
         from flask import send_from_directory
         root_dir = os.path.abspath(os.path.join(app.root_path, ".."))
+
+        _, ext = os.path.splitext(filename)
+        if ext.lower() not in _STATIC_ALLOWED_EXTENSIONS:
+            return jsonify({"error": "Resource not found."}), 404
+
         target_path = os.path.join(root_dir, filename)
         if os.path.isfile(target_path):
             return send_from_directory(root_dir, filename)

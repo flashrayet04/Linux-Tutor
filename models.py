@@ -21,6 +21,12 @@ from werkzeug.security import generate_password_hash, check_password_hash
 # ── Shared db instance (imported by app.py and all routes) ───────────────────
 db = SQLAlchemy()
 
+# A pre-computed hash with no matching plaintext password, used only to make
+# check_password_hash() do the same amount of work when a user doesn't exist.
+# This prevents attackers from telling "unknown email" apart from "wrong
+# password" by measuring response time (a timing side-channel).
+_DUMMY_PASSWORD_HASH = generate_password_hash("this-is-not-a-real-password-xyz123")
+
 
 # ─────────────────────────────────────────────────────────────────────────────
 # User

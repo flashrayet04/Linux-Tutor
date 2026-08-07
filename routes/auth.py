@@ -16,7 +16,8 @@ from flask import Blueprint, request, jsonify, session
 from flask_login import login_user, logout_user, login_required, current_user
 from flask_wtf.csrf import generate_csrf
 
-from models import db, User
+from models import db, User, _DUMMY_PASSWORD_HASH
+from werkzeug.security import check_password_hash
 
 # ── Blueprint setup ───────────────────────────────────────────────────────────
 # url_prefix is set in app.py when we register this blueprint
@@ -155,9 +156,18 @@ def login():
 
     user = User.query.filter_by(email=email).first()
 
-    # Use a constant-time check to prevent timing attacks.
-    # check_password returns False (not an exception) if user is None.
-    if user is None or not user.check_password(password):
+    # Timing-safe check: always run a password hash comparison, even when
+    # the email doesn't exist, so a nonexistent-email request takes the same
+    # time as a wrong-password request. Without this, an attacker could
+    # measure response times to enumerate which emails are registered,
+    # despite the generic error message below.
+    if user is not None:
+        password_ok = user.check_password(password)
+    else:
+        check_password_hash(_DUMMY_PASSWORD_HASH, password)
+        password_ok = False
+
+    if user is None or not password_ok:
         return _json_error("Invalid email or password.", 401)
 
     login_user(user, remember=False)
