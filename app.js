@@ -47,11 +47,85 @@ function generateRandomUsername() {
     return `${adj}${noun}${num}`;
 }
 
+// ─── Flask Backend API Client ──────────────────────────────────────────
+const API_BASE = "http://127.0.0.1:5000/api";
+
+async function apiCall(endpoint, options = {}) {
+    try {
+        const res = await fetch(`${API_BASE}${endpoint}`, {
+            headers: { "Content-Type": "application/json", ...options.headers },
+            credentials: "include", // send session cookies
+            ...options
+        });
+        const data = await res.json().catch(() => ({}));
+        if (!res.ok) throw new Error(data.error || `HTTP error ${res.status}`);
+        return data;
+    } catch (err) {
+        console.warn(`API call to ${endpoint} failed:`, err.message);
+        throw err;
+    }
+}
+
+// Backend progress & leaderboard sync functions
+async function syncProgressToBackend(lessonId, lessonTitle) {
+    if (!authState.isLoggedIn || authState.provider === "guest") return;
+    try {
+        await apiCall("/progress/lessons", {
+            method: "POST",
+            body: JSON.stringify({ lesson_id: lessonId, lesson_title: lessonTitle })
+        });
+    } catch (e) { /* ignore offline errors */ }
+}
+
+async function syncQuizToBackend(lessonId, score, totalQ, correctAnswers) {
+    if (!authState.isLoggedIn || authState.provider === "guest") return;
+    try {
+        const res = await apiCall("/quiz/submit", {
+            method: "POST",
+            body: JSON.stringify({
+                lesson_id: lessonId,
+                score: score,
+                total_questions: totalQ,
+                correct_answers: correctAnswers
+            })
+        });
+        if (res.total_xp) {
+            state.xp = res.total_xp;
+            updateXPDisplay();
+        }
+    } catch (e) { /* ignore offline errors */ }
+}
+
+async function loadLeaderboardFromBackend() {
+    try {
+        const data = await apiCall("/leaderboard/");
+        if (data.leaderboard && data.leaderboard.length > 0) {
+            return data.leaderboard.map(item => ({
+                username: item.username,
+                avatar: item.is_me ? (authState.avatar || "🐧") : "🐧",
+                online: true,
+                xp: item.total_xp,
+                rank: getRankForXP(item.total_xp).name
+            }));
+        }
+    } catch (e) { /* fallback to local demo users */ }
+    return null;
+}
+
+function getRankForXP(xp) {
+    let r = RANKS[0];
+    for (const rank of RANKS) {
+        if (xp >= rank.minXP) r = rank;
+    }
+    return r;
+}
+
 // ─── Auth / Session state ────────────────────────────────────────
 const authState = {
     isLoggedIn:   false,
-    provider:     null,   // "google" | "github" | "guest"
+    provider:     null,   // "backend" | "guest"
     username:     null,
+    email:        null,
     avatar:       "🐧",
     friends:      [],     // { username, avatar, online, xp, rank }
     friendRequests: [],   // incoming { username, avatar }
@@ -62,13 +136,14 @@ const authState = {
                 isLoggedIn:   this.isLoggedIn,
                 provider:     this.provider,
                 username:     this.username,
+                email:        this.email,
                 avatar:       this.avatar,
                 friends:      this.friends,
                 friendRequests: this.friendRequests,
             }));
             return true;
         } catch (err) {
-            console.error("Failed to save session (storage disabled or full):", err);
+            console.error("Failed to save session:", err);
             return false;
         }
     },
@@ -81,70 +156,157 @@ const authState = {
                 return true;
             }
         } catch (err) {
-            console.error("Failed to load saved session (corrupted or storage disabled):", err);
+            console.error("Failed to load saved session:", err);
         }
         return false;
     }
 };
 
-// Provider-specific avatar emojis
-const PROVIDER_LABELS  = { google: "Google", github: "GitHub", guest: "Guest" };
-
-// ─── Provider avatars for usernames (fun emoji set) ──────────────
-const USERNAME_AVATARS = ["🐧","🦊","🦅","🐉","🦁","🐺","🦝","🦄","🐸","🦋","🦚","🦜","🐼","🦖","🦈","🐙"];
-function randomAvatar() { return USERNAME_AVATARS[Math.floor(Math.random() * USERNAME_AVATARS.length)]; }
-
-// ─── Simulated user database (for friend search demo) ────────────
-const DEMO_USERS = [
-    { username: "TurboKernel420",  avatar: "🦊", online: true,  xp: 1350, rank: "Linux Wizard" },
-    { username: "SilentPenguin88", avatar: "🐧", online: false, xp:  540, rank: "Terminal Specialist" },
-    { username: "NeonCoder007",    avatar: "🦅", online: true,  xp:  880, rank: "System Guardian" },
-    { username: "CosmicSudo312",   avatar: "🐉", online: false, xp: 1800, rank: "Master SysAdmin" },
-    { username: "SwiftShell99",    avatar: "🦁", online: true,  xp:  270, rank: "Directory Artisan" },
-    { username: "QuantumByte55",   avatar: "🐼", online: false, xp:  110, rank: "Shell Explorer" },
-    { username: "CyberFalcon17",   avatar: "🦋", online: true,  xp:  600, rank: "Terminal Specialist" },
-    { username: "ElectricWolf23",  avatar: "🐺", online: false, xp:  360, rank: "Directory Artisan" },
-];
-
 // ─── Auth Screen Setup ───────────────────────────────────────────
-function setupAuthScreen() {
-    const authScreen  = document.getElementById("auth-screen");
+async function setupAuthScreen() {
+    const authScreen = document.getElementById("auth-screen");
 
-    // Check if already logged in
+    // Check if backend session is active first
+    try {
+        const meData = await apiCall("/auth/me");
+        if (meData.user) {
+            authState.isLoggedIn = true;
+            authState.provider   = "backend";
+            authState.username   = meData.user.username;
+            authState.email      = meData.user.email;
+            authState.avatar     = "🐧";
+            state.xp             = meData.user.total_xp || 0;
+            authState.save();
+            if (authScreen) authScreen.style.display = "none";
+            updateNavbarProfile();
+            loadAndRenderFriends();
+            return;
+        }
+    } catch (e) {
+        // Not logged into backend session yet
+    }
+
+    // Check local storage saved session
     if (authState.load()) {
-        // Already authenticated — skip straight to welcome screen
-        authScreen.style.display = "none";
+        if (authScreen) authScreen.style.display = "none";
         updateNavbarProfile();
-        renderFriendsList();
-        simulateIncomingRequests();
+        loadAndRenderFriends();
         return;
     }
 
-    // Wire up buttons
-    document.getElementById("btn-auth-google")?.addEventListener("click", () => {
-        beginOAuth("google", "🔵");
+    // Tab switcher between Login and Register
+    const tabLogin    = document.getElementById("tab-login");
+    const tabRegister = document.getElementById("tab-register");
+    const formLogin   = document.getElementById("form-backend-login");
+    const formReg     = document.getElementById("form-backend-register");
+
+    tabLogin?.addEventListener("click", () => {
+        tabLogin.classList.add("active");
+        tabLogin.style.background = "var(--amber,#fe8019)";
+        tabLogin.style.color = "#111";
+        tabRegister.classList.remove("active");
+        tabRegister.style.background = "transparent";
+        tabRegister.style.color = "#ebdbb2";
+        if (formLogin) formLogin.style.display = "flex";
+        if (formReg) formReg.style.display = "none";
     });
-    document.getElementById("btn-auth-github")?.addEventListener("click", () => {
-        beginOAuth("github", "⚫");
+
+    tabRegister?.addEventListener("click", () => {
+        tabRegister.classList.add("active");
+        tabRegister.style.background = "var(--amber,#fe8019)";
+        tabRegister.style.color = "#111";
+        tabLogin.classList.remove("active");
+        tabLogin.style.background = "transparent";
+        tabLogin.style.color = "#ebdbb2";
+        if (formReg) formReg.style.display = "flex";
+        if (formLogin) formLogin.style.display = "none";
     });
+
+    // Handle Login submission
+    formLogin?.addEventListener("submit", async (e) => {
+        e.preventDefault();
+        const email = document.getElementById("login-email")?.value.trim();
+        const password = document.getElementById("login-password")?.value;
+        const errDiv = document.getElementById("auth-error-msg");
+        const btn = document.getElementById("btn-login-submit");
+
+        if (errDiv) errDiv.style.display = "none";
+        if (btn) { btn.textContent = "⏳ Signing in..."; btn.disabled = true; }
+
+        try {
+            const data = await apiCall("/auth/login", {
+                method: "POST",
+                body: JSON.stringify({ email, password })
+            });
+
+            authState.isLoggedIn = true;
+            authState.provider   = "backend";
+            authState.username   = data.user.username;
+            authState.email      = data.user.email;
+            authState.avatar     = "🐧";
+            state.xp             = data.user.total_xp || 0;
+            authState.save();
+
+            dismissAuthScreen();
+            updateNavbarProfile();
+            loadAndRenderFriends();
+            triggerConfetti();
+            sfx.playLevelUp();
+        } catch (err) {
+            if (errDiv) {
+                errDiv.textContent = err.message || "Failed to sign in.";
+                errDiv.style.display = "block";
+            }
+        } finally {
+            if (btn) { btn.textContent = "Sign In →"; btn.disabled = false; }
+        }
+    });
+
+    // Handle Register submission
+    formReg?.addEventListener("submit", async (e) => {
+        e.preventDefault();
+        const username = document.getElementById("reg-username")?.value.trim();
+        const email    = document.getElementById("reg-email")?.value.trim();
+        const password = document.getElementById("reg-password")?.value;
+        const errDiv   = document.getElementById("register-error-msg");
+        const btn      = document.getElementById("btn-register-submit");
+
+        if (errDiv) errDiv.style.display = "none";
+        if (btn) { btn.textContent = "⏳ Creating account..."; btn.disabled = true; }
+
+        try {
+            const data = await apiCall("/auth/register", {
+                method: "POST",
+                body: JSON.stringify({ username, email, password })
+            });
+
+            authState.isLoggedIn = true;
+            authState.provider   = "backend";
+            authState.username   = data.user.username;
+            authState.email      = data.user.email;
+            authState.avatar     = "🐧";
+            state.xp             = data.user.total_xp || 0;
+            authState.save();
+
+            dismissAuthScreen();
+            updateNavbarProfile();
+            loadAndRenderFriends();
+            triggerConfetti();
+            sfx.playLevelUp();
+        } catch (err) {
+            if (errDiv) {
+                errDiv.textContent = err.message || "Failed to register account.";
+                errDiv.style.display = "block";
+            }
+        } finally {
+            if (btn) { btn.textContent = "Create Account 🚀"; btn.disabled = false; }
+        }
+    });
+
+    // Guest Auth Button
     document.getElementById("btn-auth-guest")?.addEventListener("click", () => {
         beginGuestAuth();
     });
-}
-
-function beginOAuth(provider) {
-    sfx.playClick();
-    // Simulate OAuth loading (in production, redirect to real OAuth endpoint)
-    const authScreen = document.getElementById("auth-screen");
-    const btn = document.getElementById(`btn-auth-${provider}`);
-    if (btn) { btn.textContent = "⏳ Connecting..."; btn.disabled = true; }
-
-    setTimeout(() => {
-        authState.provider = provider;
-        authState.avatar   = randomAvatar();
-        dismissAuthScreen();
-        showUsernameModal();
-    }, 1200);
 }
 
 function beginGuestAuth() {
@@ -158,6 +320,16 @@ function beginGuestAuth() {
     authState.save();
     dismissAuthScreen();
     updateNavbarProfile();
+    loadAndRenderFriends();
+}
+
+async function loadAndRenderFriends() {
+    const backendLeaderboard = await loadLeaderboardFromBackend();
+    if (backendLeaderboard) {
+        authState.friends = backendLeaderboard;
+    } else {
+        renderFriendsList();
+    }
     renderFriendsList();
 }
 
@@ -1608,6 +1780,8 @@ function checkLessonAndMissions(userCmd) {
         } else {
             triggerConfetti();
             sfx.playLevelUp();
+            const completedTitle = lessons[state.currentModuleIdx]?.title || `Module ${state.currentModuleIdx + 1}`;
+            syncProgressToBackend(`module_${state.currentModuleIdx + 1}`, completedTitle);
             addXP(100);
             printToTerminal(`🏆 Module ${state.currentModuleIdx + 1} Mastered! Bonus +100 XP!`, "success");
             if (state.currentModuleIdx < lessons.length - 1) {
@@ -1623,6 +1797,7 @@ function addXP(amount) {
     state.xp += amount;
     if ($("user-xp")) $("user-xp").textContent = state.xp;
     updateUserRankUI();
+    syncQuizToBackend("general_xp", amount, 1, 1);
 }
 
 function updateUserRankUI() {

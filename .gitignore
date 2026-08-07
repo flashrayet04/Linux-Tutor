@@ -1,0 +1,26 @@
+# Python
+__pycache__/
+*.py[cod]
+*.pyo
+*.pyd
+.Python
+
+# Virtual environments
+venv/
+.venv/
+env/
+ENV/
+
+# Flask / SQLite
+database.db
+*.db-journal
+
+# Environment variables — NEVER commit this file
+.env
+
+# Flask-Migrate (keep the migrations/ folder itself, but not its cache)
+migrations/__pycache__/
+
+# OS junk
+.DS_Store
+Thumbs.db
