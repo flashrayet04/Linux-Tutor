@@ -297,7 +297,7 @@ def create_app() -> Flask:
     @app.route("/")
     def serve_frontend_index():
         from flask import send_from_directory
-        root_dir = os.path.abspath(os.path.join(app.root_path, ".."))
+        root_dir = app.root_path
         return send_from_directory(root_dir, "index.html")
 
     # Only these files/extensions are safe to serve as static frontend assets.
@@ -311,7 +311,7 @@ def create_app() -> Flask:
     @app.route("/<path:filename>")
     def serve_frontend_static(filename):
         from flask import send_from_directory
-        root_dir = os.path.abspath(os.path.join(app.root_path, ".."))
+        root_dir = app.root_path
 
         _, ext = os.path.splitext(filename)
         if ext.lower() not in _STATIC_ALLOWED_EXTENSIONS:
