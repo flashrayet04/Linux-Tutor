@@ -307,6 +307,19 @@ async function setupAuthScreen() {
     document.getElementById("btn-auth-guest")?.addEventListener("click", () => {
         beginGuestAuth();
     });
+
+    // Profile chip — if the user is a guest, clicking it reopens the
+    // sign-in/register screen so they can create a real account.
+    // (Logged-in users could later get a proper profile menu here.)
+    document.getElementById("btn-user-profile")?.addEventListener("click", () => {
+        if (!authState.isLoggedIn || authState.provider === "guest") {
+            const authScreen = document.getElementById("auth-screen");
+            if (authScreen) {
+                authScreen.style.display = "flex";
+                authScreen.classList.remove("fade-out");
+            }
+        }
+    });
 }
 
 function beginGuestAuth() {
