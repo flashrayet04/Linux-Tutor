@@ -349,4 +349,4 @@ if __name__ == "__main__":
         print("⚠  WARNING: You are using the default SECRET_KEY.")
         print("   Copy .env.example to .env and set a real SECRET_KEY before deploying.\n")
 
-    app.run(debug=debug, host="127.0.0.1", port=5000)
+    app.run(debug=debug, host="0.0.0.0", port=int(os.environ.get("PORT", 5000)))
