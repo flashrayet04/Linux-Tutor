@@ -48,7 +48,10 @@ function generateRandomUsername() {
 }
 
 // ─── Flask Backend API Client ──────────────────────────────────────────
-const API_BASE = "http://127.0.0.1:5000/api";
+// Uses whatever domain the page is currently loaded from, so this works
+// both locally (http://127.0.0.1:5000) and on the live Render URL,
+// without needing to hardcode either one.
+const API_BASE = `${window.location.origin}/api`;
 
 async function apiCall(endpoint, options = {}) {
     try {
