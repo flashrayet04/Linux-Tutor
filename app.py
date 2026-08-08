@@ -191,6 +191,27 @@ def create_app() -> Flask:
         """Simple endpoint to confirm the server is running."""
         return jsonify({"status": "ok", "service": "Linux Tutor API"})
 
+    # ── TEMPORARY: one-time admin promotion route ─────────────────────────────
+    # Used once to grant admin rights after the old admin password leaked.
+    # Protected by a secret set in the ADMIN_SETUP_SECRET env var — visit
+    # /api/promote-admin?email=you@example.com&secret=... once, then DELETE
+    # this whole route and redeploy. Do not leave this in the app long-term.
+    @app.get("/api/promote-admin")
+    def promote_admin():
+        secret = request.args.get("secret", "")
+        expected = os.environ.get("ADMIN_SETUP_SECRET", "")
+        if not expected or secret != expected:
+            return jsonify({"error": "Not found."}), 404
+
+        email = request.args.get("email", "").strip().lower()
+        user = User.query.filter_by(email=email).first()
+        if not user:
+            return jsonify({"error": f"No user found with email {email}"}), 404
+
+        user.is_admin = True
+        db.session.commit()
+        return jsonify({"status": "ok", "message": f"{email} is now an admin."})
+
     # ── Browser login page (for accessing /admin in the browser) ─────────────
     # This is a simple HTML form — not part of the JSON API.
     # After a successful login it redirects straight to /admin.
