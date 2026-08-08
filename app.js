@@ -437,6 +437,12 @@ function validateUsername(val) {
 }
 
 // ─── Navbar Profile Update ────────────────────────────────────────
+// Small badge label shown next to the username based on how they signed in.
+const PROVIDER_LABELS = {
+    guest:   "Guest",
+    backend: "",   // Registered account — no extra badge needed
+};
+
 function updateNavbarProfile() {
     const avatarEl   = document.getElementById("navbar-avatar");
     const unameEl    = document.getElementById("navbar-username");
