@@ -194,33 +194,11 @@ async function setupAuthScreen() {
         }
     });
 
-    // Check if backend session is active first
-    try {
-        const meData = await apiCall("/auth/me");
-        if (meData.user) {
-            authState.isLoggedIn = true;
-            authState.provider = "backend";
-            authState.username = meData.user.username;
-            authState.email = meData.user.email;
-            authState.avatar = "";
-            state.xp = meData.user.total_xp || 0;
-            authState.save();
-            if (authScreen) authScreen.style.display = "none";
-            updateNavbarProfile();
-            loadAndRenderFriends();
-            return;
-        }
-    } catch (e) {
-        // Not logged into backend session yet
-    }
-
-    // Check local storage saved session
-    if (authState.load()) {
-        if (authScreen) authScreen.style.display = "none";
-        updateNavbarProfile();
-        loadAndRenderFriends();
-        return;
-    }
+    // ── Everything below wires up buttons/forms on the auth screen. ──────
+    // This must ALL happen before the session-restore checks further down,
+    // because those checks `return` early when a session already exists
+    // (e.g. a saved guest session) — and a `return` before this point would
+    // skip attaching these listeners entirely, leaving the tabs/forms dead.
 
     // Tab switcher between Login and Register
     const tabLogin = document.getElementById("tab-login");
@@ -335,6 +313,36 @@ async function setupAuthScreen() {
     document.getElementById("btn-auth-guest")?.addEventListener("click", () => {
         beginGuestAuth();
     });
+
+    // ── Session-restore checks (these may `return` early — must stay LAST) ──
+
+    // Check if backend session is active first
+    try {
+        const meData = await apiCall("/auth/me");
+        if (meData.user) {
+            authState.isLoggedIn = true;
+            authState.provider = "backend";
+            authState.username = meData.user.username;
+            authState.email = meData.user.email;
+            authState.avatar = "";
+            state.xp = meData.user.total_xp || 0;
+            authState.save();
+            if (authScreen) authScreen.style.display = "none";
+            updateNavbarProfile();
+            loadAndRenderFriends();
+            return;
+        }
+    } catch (e) {
+        // Not logged into backend session yet
+    }
+
+    // Check local storage saved session
+    if (authState.load()) {
+        if (authScreen) authScreen.style.display = "none";
+        updateNavbarProfile();
+        loadAndRenderFriends();
+        return;
+    }
 }
 
 // ─────────────────────────────────────────────────────────────────
