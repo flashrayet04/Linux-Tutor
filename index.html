@@ -42,6 +42,24 @@
                 <input type="email" id="login-email" placeholder="Email address" required style="padding:10px 14px;background:rgba(0,0,0,0.4);border:1px solid rgba(255,255,255,0.15);border-radius:6px;color:#fff;outline:none;font-size:14px;">
                 <input type="password" id="login-password" placeholder="Password" required style="padding:10px 14px;background:rgba(0,0,0,0.4);border:1px solid rgba(255,255,255,0.15);border-radius:6px;color:#fff;outline:none;font-size:14px;">
                 <button type="submit" id="btn-login-submit" style="background:var(--amber,#fe8019);color:#111;font-weight:700;padding:12px;border:none;border-radius:6px;cursor:pointer;font-size:15px;transition:all 0.2s;">Sign In </button>
+                <button type="button" id="btn-show-forgot-password" style="background:none;border:none;color:#928374;font-size:12.5px;cursor:pointer;text-decoration:underline;padding:2px;align-self:center;">Forgot password?</button>
+            </form>
+
+            <!-- Forgot Password Form (hidden initially) -->
+            <form id="form-forgot-password" style="display:none;flex-direction:column;gap:12px;margin-bottom:16px;">
+                <div id="forgot-msg" style="font-size:13px;display:none;padding:8px 12px;border-radius:6px;"></div>
+                <p style="color:#928374;font-size:13px;margin:0 0 4px;">Enter your account email and we'll send you a link to reset your password.</p>
+                <input type="email" id="forgot-email" placeholder="Email address" required style="padding:10px 14px;background:rgba(0,0,0,0.4);border:1px solid rgba(255,255,255,0.15);border-radius:6px;color:#fff;outline:none;font-size:14px;">
+                <button type="submit" id="btn-forgot-submit" style="background:var(--amber,#fe8019);color:#111;font-weight:700;padding:12px;border:none;border-radius:6px;cursor:pointer;font-size:15px;">Send Reset Link</button>
+                <button type="button" id="btn-back-to-login" style="background:none;border:none;color:#928374;font-size:12.5px;cursor:pointer;text-decoration:underline;padding:2px;align-self:center;">Back to Sign In</button>
+            </form>
+
+            <!-- Reset Password Form (hidden initially — shown when a reset link is opened) -->
+            <form id="form-reset-password" style="display:none;flex-direction:column;gap:12px;margin-bottom:16px;">
+                <div id="reset-msg" style="font-size:13px;display:none;padding:8px 12px;border-radius:6px;"></div>
+                <p style="color:#928374;font-size:13px;margin:0 0 4px;">Choose a new password for your account.</p>
+                <input type="password" id="reset-new-password" placeholder="New password (min 8 chars)" required style="padding:10px 14px;background:rgba(0,0,0,0.4);border:1px solid rgba(255,255,255,0.15);border-radius:6px;color:#fff;outline:none;font-size:14px;">
+                <button type="submit" id="btn-reset-submit" style="background:var(--amber,#fe8019);color:#111;font-weight:700;padding:12px;border:none;border-radius:6px;cursor:pointer;font-size:15px;">Reset Password</button>
             </form>
 
             <!-- Register Form (hidden initially) -->
@@ -223,11 +241,18 @@
                     <button class="ctrl-btn" id="btn-toggle-font" title="Toggle Elder Friendly Large Text Mode"> Font</button>
                     <button class="ctrl-btn ctrl-btn--friends" id="btn-open-friends" title="Friends List"> Friends <span class="friends-notif-dot hidden" id="friends-notif-dot"></span></button>
                     <!-- Profile Chip -->
-                    <button class="user-profile-chip" id="btn-user-profile" title="Your Profile">
-                        <span class="profile-avatar" id="navbar-avatar"></span>
-                        <span class="profile-username" id="navbar-username">Guest</span>
-                        <span class="profile-provider-badge" id="navbar-provider-badge"></span>
-                    </button>
+                    <div style="position:relative;">
+                        <button class="user-profile-chip" id="btn-user-profile" title="Your Profile">
+                            <span class="profile-avatar" id="navbar-avatar"></span>
+                            <span class="profile-username" id="navbar-username">Guest</span>
+                            <span class="profile-provider-badge" id="navbar-provider-badge"></span>
+                        </button>
+                        <!-- Dropdown for logged-in (non-guest) users -->
+                        <div id="profile-dropdown" style="display:none;position:absolute;top:110%;right:0;background:#282828;border:1px solid rgba(255,255,255,0.12);border-radius:8px;padding:6px;min-width:160px;z-index:50;box-shadow:0 8px 24px rgba(0,0,0,0.4);">
+                            <button id="btn-open-change-password" style="width:100%;text-align:left;background:none;border:none;color:#ebdbb2;padding:8px 10px;border-radius:6px;cursor:pointer;font-size:13.5px;">Change Password</button>
+                            <button id="btn-logout" style="width:100%;text-align:left;background:none;border:none;color:#fb4934;padding:8px 10px;border-radius:6px;cursor:pointer;font-size:13.5px;">Log Out</button>
+                        </div>
+                    </div>
                 </div>
             </div>
         </header>
@@ -606,6 +631,22 @@
 
     <!-- Celebration Canvas for Confetti -->
     <canvas id="confetti-canvas"></canvas>
+
+    <!-- Change Password Modal -->
+    <div id="change-password-modal" class="modal-overlay" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,0.6);align-items:center;justify-content:center;z-index:200;">
+        <div style="background:#282828;border:1px solid rgba(255,255,255,0.12);border-radius:12px;padding:28px;width:340px;max-width:90vw;">
+            <h3 style="color:#ebdbb2;font-size:18px;margin:0 0 16px;">Change Password</h3>
+            <form id="form-change-password" style="display:flex;flex-direction:column;gap:12px;">
+                <div id="change-password-msg" style="font-size:13px;display:none;padding:8px 12px;border-radius:6px;"></div>
+                <input type="password" id="cp-current-password" placeholder="Current password" required style="padding:10px 14px;background:rgba(0,0,0,0.4);border:1px solid rgba(255,255,255,0.15);border-radius:6px;color:#fff;outline:none;font-size:14px;">
+                <input type="password" id="cp-new-password" placeholder="New password (min 8 chars)" required style="padding:10px 14px;background:rgba(0,0,0,0.4);border:1px solid rgba(255,255,255,0.15);border-radius:6px;color:#fff;outline:none;font-size:14px;">
+                <div style="display:flex;gap:8px;margin-top:4px;">
+                    <button type="submit" id="btn-change-password-submit" style="flex:1;background:var(--amber,#fe8019);color:#111;font-weight:700;padding:10px;border:none;border-radius:6px;cursor:pointer;font-size:14px;">Update Password</button>
+                    <button type="button" id="btn-cancel-change-password" style="flex:1;background:rgba(255,255,255,0.08);color:#ebdbb2;font-weight:600;padding:10px;border:none;border-radius:6px;cursor:pointer;font-size:14px;">Cancel</button>
+                </div>
+            </form>
+        </div>
+    </div>
 
     <script src="app.js"></script>
 </body>

@@ -169,16 +169,28 @@ const authState = {
 async function setupAuthScreen() {
     const authScreen = document.getElementById("auth-screen");
 
-    // Profile chip — if the user is a guest (or not logged in), clicking it
-    // reopens the sign-in/register screen so they can create a real account.
+    // Profile chip — guests get the sign-in screen reopened; logged-in
+    // users get a small dropdown (Change Password / Log Out) instead.
     // Attached FIRST, before any early returns below, so it always works
     // regardless of whether a session is already saved.
-    document.getElementById("btn-user-profile")?.addEventListener("click", () => {
+    document.getElementById("btn-user-profile")?.addEventListener("click", (e) => {
+        e.stopPropagation();
         if (!authState.isLoggedIn || authState.provider === "guest") {
             if (authScreen) {
                 authScreen.style.display = "flex";
                 authScreen.classList.remove("fade-out");
             }
+        } else {
+            const dropdown = document.getElementById("profile-dropdown");
+            if (dropdown) dropdown.style.display = dropdown.style.display === "block" ? "none" : "block";
+        }
+    });
+
+    // Close the dropdown when clicking anywhere else on the page
+    document.addEventListener("click", (e) => {
+        const dropdown = document.getElementById("profile-dropdown");
+        if (dropdown && dropdown.style.display === "block" && !dropdown.contains(e.target)) {
+            dropdown.style.display = "none";
         }
     });
 
@@ -322,6 +334,185 @@ async function setupAuthScreen() {
     // Guest Auth Button
     document.getElementById("btn-auth-guest")?.addEventListener("click", () => {
         beginGuestAuth();
+    });
+}
+
+// ─────────────────────────────────────────────────────────────────
+// Change / Forgot / Reset Password
+// ─────────────────────────────────────────────────────────────────
+function setupPasswordFeatures() {
+    const authScreen    = document.getElementById("auth-screen");
+    const formLogin      = document.getElementById("form-backend-login");
+    const formReg         = document.getElementById("form-backend-register");
+    const formForgot     = document.getElementById("form-forgot-password");
+    const formResetPw    = document.getElementById("form-reset-password");
+    const tabLogin        = document.getElementById("tab-login");
+    const tabRegister     = document.getElementById("tab-register");
+    const tabsRow          = document.querySelector(".auth-tabs");
+
+    function showOnly(formToShow) {
+        [formLogin, formReg, formForgot, formResetPw].forEach(f => {
+            if (f) f.style.display = (f === formToShow) ? "flex" : "none";
+        });
+    }
+
+    // "Forgot password?" link on the login form
+    document.getElementById("btn-show-forgot-password")?.addEventListener("click", () => {
+        if (tabsRow) tabsRow.style.display = "none";
+        showOnly(formForgot);
+    });
+
+    // "Back to Sign In" link on the forgot-password form
+    document.getElementById("btn-back-to-login")?.addEventListener("click", () => {
+        if (tabsRow) tabsRow.style.display = "flex";
+        showOnly(formLogin);
+    });
+
+    // Submit forgot-password request
+    formForgot?.addEventListener("submit", async (e) => {
+        e.preventDefault();
+        const email = document.getElementById("forgot-email")?.value.trim();
+        const msgDiv = document.getElementById("forgot-msg");
+        const btn = document.getElementById("btn-forgot-submit");
+
+        if (btn) { btn.textContent = "Sending..."; btn.disabled = true; }
+
+        try {
+            const data = await apiCall("/auth/forgot-password", {
+                method: "POST",
+                body: JSON.stringify({ email })
+            });
+            if (msgDiv) {
+                msgDiv.style.color = "#b8bb26";
+                msgDiv.style.background = "rgba(184,187,38,0.1)";
+                msgDiv.textContent = data.message || "If that email is registered, a reset link has been sent.";
+                msgDiv.style.display = "block";
+            }
+        } catch (err) {
+            if (msgDiv) {
+                msgDiv.style.color = "#fb4934";
+                msgDiv.style.background = "rgba(251,73,52,0.1)";
+                msgDiv.textContent = err.message || "Something went wrong. Please try again.";
+                msgDiv.style.display = "block";
+            }
+        } finally {
+            if (btn) { btn.textContent = "Send Reset Link"; btn.disabled = false; }
+        }
+    });
+
+    // If the page was opened from a reset-password email link (?resetToken=...),
+    // open the auth screen directly on the reset-password form.
+    const urlParams = new URLSearchParams(window.location.search);
+    const resetToken = urlParams.get("resetToken");
+    if (resetToken) {
+        if (authScreen) {
+            authScreen.style.display = "flex";
+            authScreen.classList.remove("fade-out");
+        }
+        if (tabsRow) tabsRow.style.display = "none";
+        showOnly(formResetPw);
+    }
+
+    // Submit the new password using the token from the URL
+    formResetPw?.addEventListener("submit", async (e) => {
+        e.preventDefault();
+        const newPassword = document.getElementById("reset-new-password")?.value;
+        const msgDiv = document.getElementById("reset-msg");
+        const btn = document.getElementById("btn-reset-submit");
+
+        if (btn) { btn.textContent = "Resetting..."; btn.disabled = true; }
+
+        try {
+            const data = await apiCall("/auth/reset-password", {
+                method: "POST",
+                body: JSON.stringify({ token: resetToken, new_password: newPassword })
+            });
+            if (msgDiv) {
+                msgDiv.style.color = "#b8bb26";
+                msgDiv.style.background = "rgba(184,187,38,0.1)";
+                msgDiv.textContent = (data.message || "Password reset successfully.") + " You can now sign in.";
+                msgDiv.style.display = "block";
+            }
+            // Clean the token out of the URL and swap to the login form
+            window.history.replaceState({}, "", window.location.pathname);
+            setTimeout(() => {
+                if (tabsRow) tabsRow.style.display = "flex";
+                showOnly(formLogin);
+            }, 1800);
+        } catch (err) {
+            if (msgDiv) {
+                msgDiv.style.color = "#fb4934";
+                msgDiv.style.background = "rgba(251,73,52,0.1)";
+                msgDiv.textContent = err.message || "That reset link is invalid or has expired.";
+                msgDiv.style.display = "block";
+            }
+        } finally {
+            if (btn) { btn.textContent = "Reset Password"; btn.disabled = false; }
+        }
+    });
+
+    // ── Profile dropdown actions (Change Password / Log Out) ──────────
+    const changePasswordModal = document.getElementById("change-password-modal");
+
+    document.getElementById("btn-open-change-password")?.addEventListener("click", () => {
+        document.getElementById("profile-dropdown").style.display = "none";
+        if (changePasswordModal) changePasswordModal.style.display = "flex";
+    });
+
+    document.getElementById("btn-cancel-change-password")?.addEventListener("click", () => {
+        if (changePasswordModal) changePasswordModal.style.display = "none";
+    });
+
+    document.getElementById("form-change-password")?.addEventListener("submit", async (e) => {
+        e.preventDefault();
+        const currentPassword = document.getElementById("cp-current-password")?.value;
+        const newPassword = document.getElementById("cp-new-password")?.value;
+        const msgDiv = document.getElementById("change-password-msg");
+        const btn = document.getElementById("btn-change-password-submit");
+
+        if (btn) { btn.textContent = "Updating..."; btn.disabled = true; }
+
+        try {
+            const data = await apiCall("/auth/change-password", {
+                method: "POST",
+                body: JSON.stringify({ current_password: currentPassword, new_password: newPassword })
+            });
+            if (msgDiv) {
+                msgDiv.style.color = "#b8bb26";
+                msgDiv.style.background = "rgba(184,187,38,0.1)";
+                msgDiv.textContent = data.message || "Password changed successfully.";
+                msgDiv.style.display = "block";
+            }
+            setTimeout(() => {
+                if (changePasswordModal) changePasswordModal.style.display = "none";
+                document.getElementById("form-change-password")?.reset();
+                if (msgDiv) msgDiv.style.display = "none";
+            }, 1500);
+        } catch (err) {
+            if (msgDiv) {
+                msgDiv.style.color = "#fb4934";
+                msgDiv.style.background = "rgba(251,73,52,0.1)";
+                msgDiv.textContent = err.message || "Failed to change password.";
+                msgDiv.style.display = "block";
+            }
+        } finally {
+            if (btn) { btn.textContent = "Update Password"; btn.disabled = false; }
+        }
+    });
+
+    document.getElementById("btn-logout")?.addEventListener("click", async () => {
+        document.getElementById("profile-dropdown").style.display = "none";
+        try {
+            await apiCall("/auth/logout", { method: "POST" });
+        } catch (err) {
+            // Even if the server call fails, still clear the local session below
+        }
+        authState.isLoggedIn = false;
+        authState.provider = null;
+        authState.username = "";
+        authState.email = "";
+        authState.save();
+        window.location.reload();
     });
 }
 
@@ -922,6 +1113,7 @@ const $ = id => document.getElementById(id);
 
 document.addEventListener("DOMContentLoaded", () => {
     setupAuthScreen(); // Auth system (runs first)
+    setupPasswordFeatures(); // Change/forgot/reset password
     setupFriendsPanel(); // Friends slide-in panel
     setupWelcomeScreen();
     setupNavigation();
