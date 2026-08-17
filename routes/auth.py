@@ -9,12 +9,16 @@ Endpoints:
   GET  /api/auth/csrf-token  — Return a CSRF token for the frontend to use
 """
 
+import os
 import re
+import smtplib
+from email.mime.text import MIMEText
 from datetime import datetime, timezone
 
-from flask import Blueprint, request, jsonify, session
+from flask import Blueprint, request, jsonify, session, current_app
 from flask_login import login_user, logout_user, login_required, current_user
 from flask_wtf.csrf import generate_csrf
+from itsdangerous import URLSafeTimedSerializer, BadSignature, SignatureExpired
 
 from models import db, User, _DUMMY_PASSWORD_HASH
 from werkzeug.security import check_password_hash
@@ -60,6 +64,59 @@ def _validate_register_input(data: dict) -> str | None:
 def _json_error(message: str, status_code: int):
     """Return a consistent JSON error response."""
     return jsonify({"error": message}), status_code
+
+
+# ── Password reset token helpers ──────────────────────────────────────────
+# We use a stateless signed token (via itsdangerous) instead of storing a
+# reset token in the database. The token itself encodes the user's email
+# and an expiry, signed with SECRET_KEY — so it can't be forged, and it
+# needs no extra database columns or migrations.
+_RESET_SALT = "password-reset"
+_RESET_MAX_AGE_SECONDS = 60 * 60  # 1 hour
+
+
+def _get_serializer() -> URLSafeTimedSerializer:
+    return URLSafeTimedSerializer(current_app.config["SECRET_KEY"])
+
+
+def _send_password_reset_email(to_email: str, reset_url: str) -> None:
+    """
+    Sends the password reset email via SMTP.
+
+    If MAIL_USERNAME / MAIL_PASSWORD aren't set in the environment yet,
+    this safely falls back to printing the reset link to the server logs
+    instead of raising an error — handy for local dev and for testing on
+    Render before you've configured a real mail account.
+    """
+    mail_user = os.environ.get("MAIL_USERNAME")
+    mail_pass = os.environ.get("MAIL_PASSWORD")
+    mail_server = os.environ.get("MAIL_SERVER", "smtp.gmail.com")
+    mail_port = int(os.environ.get("MAIL_PORT", "587"))
+
+    if not mail_user or not mail_pass:
+        current_app.logger.warning(
+            f"[DEV] MAIL_USERNAME/MAIL_PASSWORD not set — "
+            f"password reset link for {to_email}: {reset_url}"
+        )
+        return
+
+    body = (
+        "Hi there,\n\n"
+        "We received a request to reset your Linux Tutor password.\n\n"
+        f"Click the link below to choose a new password:\n{reset_url}\n\n"
+        "This link expires in 1 hour. If you didn't request this, "
+        "you can safely ignore this email — your password won't be changed.\n\n"
+        "— Linux Tutor"
+    )
+    msg = MIMEText(body)
+    msg["Subject"] = "Reset your Linux Tutor password"
+    msg["From"] = mail_user
+    msg["To"] = to_email
+
+    with smtplib.SMTP(mail_server, mail_port, timeout=10) as server:
+        server.starttls()
+        server.login(mail_user, mail_pass)
+        server.send_message(msg)
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -200,3 +257,120 @@ def me():
     logged in (the session cookie is sent automatically by the browser).
     """
     return jsonify({"user": current_user.to_dict()})
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# POST /api/auth/change-password
+# ─────────────────────────────────────────────────────────────────────────────
+@auth_bp.post("/change-password")
+@login_required
+def change_password():
+    """
+    Change the logged-in user's password.
+
+    Expected JSON body:
+      { "current_password": "old123", "new_password": "newpass456" }
+
+    Requires the CURRENT password as proof of identity — someone with just
+    an open session (e.g. a shared/public computer) can't silently hijack
+    the account by changing the password without knowing it.
+    """
+    data = request.get_json(silent=True)
+    if not data:
+        return _json_error("Request body must be JSON.", 400)
+
+    current_password = data.get("current_password", "")
+    new_password     = data.get("new_password", "")
+
+    if not current_password or not new_password:
+        return _json_error("current_password and new_password are both required.", 400)
+
+    if not current_user.check_password(current_password):
+        return _json_error("Current password is incorrect.", 400)
+
+    if len(new_password) < 8:
+        return _json_error("New password must be at least 8 characters long.", 400)
+
+    current_user.set_password(new_password)
+    db.session.commit()
+
+    return jsonify({"message": "Password changed successfully."})
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# POST /api/auth/forgot-password
+# ─────────────────────────────────────────────────────────────────────────────
+@auth_bp.post("/forgot-password")
+def forgot_password():
+    """
+    Request a password reset link by email.
+
+    Expected JSON body:
+      { "email": "alice@example.com" }
+
+    Always returns the same generic success message, whether or not that
+    email is actually registered — this prevents attackers from using this
+    endpoint to discover which emails have accounts (enumeration attack).
+    """
+    data = request.get_json(silent=True)
+    if not data:
+        return _json_error("Request body must be JSON.", 400)
+
+    email = data.get("email", "").strip().lower()
+    if not email:
+        return _json_error("email is required.", 400)
+
+    user = User.query.filter_by(email=email).first()
+    if user:
+        token = _get_serializer().dumps(email, salt=_RESET_SALT)
+        reset_url = f"{request.host_url.rstrip('/')}/?resetToken={token}"
+        try:
+            _send_password_reset_email(email, reset_url)
+        except Exception as e:
+            # Don't leak SMTP errors to the client — log server-side instead.
+            current_app.logger.error(f"Failed to send password reset email: {e}")
+
+    return jsonify({
+        "message": "If that email is registered, a password reset link has been sent."
+    })
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# POST /api/auth/reset-password
+# ─────────────────────────────────────────────────────────────────────────────
+@auth_bp.post("/reset-password")
+def reset_password():
+    """
+    Complete a password reset using the token from the emailed link.
+
+    Expected JSON body:
+      { "token": "...", "new_password": "newpass456" }
+    """
+    data = request.get_json(silent=True)
+    if not data:
+        return _json_error("Request body must be JSON.", 400)
+
+    token        = data.get("token", "")
+    new_password = data.get("new_password", "")
+
+    if not token or not new_password:
+        return _json_error("token and new_password are both required.", 400)
+
+    if len(new_password) < 8:
+        return _json_error("New password must be at least 8 characters long.", 400)
+
+    try:
+        email = _get_serializer().loads(token, salt=_RESET_SALT, max_age=_RESET_MAX_AGE_SECONDS)
+    except SignatureExpired:
+        return _json_error("This reset link has expired. Please request a new one.", 400)
+    except BadSignature:
+        return _json_error("This reset link is invalid.", 400)
+
+    user = User.query.filter_by(email=email).first()
+    if not user:
+        return _json_error("No account found for this reset link.", 404)
+
+    user.set_password(new_password)
+    db.session.commit()
+
+    return jsonify({"message": "Password reset successfully. You can now log in."})
