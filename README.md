@@ -1,6 +1,14 @@
 # 🐧 Linux Command Tutor Application
 
-An interactive dual-mode learning application designed to help beginners master Linux terminal commands fluently.
+An interactive, gamified web app that teaches Linux terminal commands through a safe simulated shell — missions, XP, quizzes, badges, and a printable completion certificate.
+
+### 🔗 [**Try it live → linux-tutor.onrender.com**](https://linux-tutor.onrender.com/)
+> Hosted on Render's free tier — the first load after inactivity can take ~30s to spin up. Thanks for your patience!
+
+<!-- Add a screenshot or GIF here, e.g.: -->
+<!-- ![LinuxTutor demo](./docs/demo.gif) -->
+
+Also includes a standalone terminal-based CLI version (`linux_tutor.py`) for anyone who wants the lesson content without the web app.
 
 ---
 
